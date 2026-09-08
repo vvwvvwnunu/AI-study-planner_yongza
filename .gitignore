@@ -1,0 +1,17 @@
+# Secrets and local environment values
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Local/generated files
+node_modules/
+work/
+*.log
+.DS_Store
+Thumbs.db

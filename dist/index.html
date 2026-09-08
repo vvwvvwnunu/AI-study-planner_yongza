@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0f19" />
+    <meta name="description" content="고등학생을 위한 AI 맞춤형 공부 계획 앱 용자" />
+    <title>용자 · AI 스터디 플래너</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <button class="brand" data-nav="home" aria-label="홈으로 이동">
+          <span class="brand-mark" aria-hidden="true"><span>✦</span></span>
+          <span class="brand-copy"><strong>용자</strong><small id="sectionLabel">오늘의 플래너</small></span>
+        </button>
+        <div class="top-actions">
+          <div class="streak-chip" aria-label="연속 공부 14일">🔥 <span>14일 연속</span></div>
+          <button class="avatar-button" id="profileButton" aria-label="계정과 설정 열기"><span id="avatarLetter">민</span></button>
+        </div>
+      </header>
+
+      <main id="appMain">
+        <section class="screen active" data-screen="home" aria-labelledby="homeTitle">
+          <div class="home-intro">
+            <div>
+              <p class="eyebrow">DAILY VERSE · 9월 9일</p>
+              <h1 id="homeTitle"><span id="dailyQuote">작은 몰입이, 내일의 나를 만든다.</span></h1>
+              <p class="muted">민서님에게 맞춰 오늘의 타임테이블을 준비했어요.</p>
+            </div>
+            <button class="icon-button" id="refreshPlan" aria-label="계획 새로고침">↻</button>
+          </div>
+
+          <article class="timetable-card glass-card">
+            <div class="timetable-aura"></div>
+            <div class="timetable-head">
+              <div><p class="eyebrow mint">TODAY · 9월 9일 수요일</p><h2>오늘의 타임테이블</h2><p class="muted small">공부 흐름을 보면서 바로 AI에게 물어보세요.</p></div>
+              <span class="live-pill"><i></i> 지금 15:42</span>
+            </div>
+            <div class="timetable-list">
+              <div class="time-row muted-row"><time>08:00</time><span class="time-line"></span><div class="time-block school"><strong>학교 수업</strong><small>국어 · 영어 · 수학</small></div></div>
+              <div class="time-row done-row"><time>15:00</time><span class="time-line"></span><div class="time-block science-block"><span class="block-status">완료</span><strong>뉴턴 역학 개념 총정리</strong><small>과학 · 50분</small></div></div>
+              <div class="time-row current-row"><time>16:00</time><span class="time-line"></span><div class="time-block current-block"><span class="block-status">다음 미션</span><strong>현대소설 구조 분석</strong><small>국어 · 45분 · AI 추천</small></div></div>
+              <div class="time-row"><time>19:30</time><span class="time-line"></span><div class="time-block"><strong>항성 진화 3강 수강</strong><small>과학 · 38분</small></div></div>
+              <div class="time-row"><time>20:20</time><span class="time-line"></span><div class="time-block"><strong>수능 영단어 150개 회독</strong><small>영어 · 25분</small></div></div>
+            </div>
+            <div class="inline-ai-label"><span class="ai-mini">✦</span><strong>타임테이블을 보며 AI에게 질문</strong><span class="muted small">Gemini 준비됨</span></div>
+            <form class="inline-ai-composer" id="homeChatForm"><input id="homeChatInput" placeholder="예: 지금 다음에 뭘 먼저 할까?" autocomplete="off" /><button class="send-button" aria-label="타임테이블 질문 보내기">➤</button></form>
+            <div class="inline-ai-reply" id="homeAiReply" aria-live="polite"></div>
+          </article>
+
+          <div class="exam-compact" aria-label="2학기 중간고사까지 D-18"><span class="exam-label">2학기 중간고사</span><span class="exam-date">9월 27일</span><strong>D-18</strong><span class="exam-progress"><i></i></span></div>
+
+          <div class="stat-grid">
+            <article class="stat-card glass-card"><span class="stat-icon mint-bg">◷</span><div><strong id="plannedMinutes">3h 10m</strong><small>오늘 예정</small></div><em>+42m</em></article>
+            <article class="stat-card glass-card"><span class="stat-icon purple-bg">✦</span><div><strong id="doneCount">4 / 6</strong><small>미션 완료</small></div><em class="good">67%</em></article>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="planner" aria-labelledby="plannerTitle">
+          <div class="screen-title-row"><div><p class="eyebrow">SUBJECT PLANNER</p><h1 id="plannerTitle">과목 플래너</h1><p class="muted">시험 전까지의 타임테이블을 한눈에 봐요.</p></div><button class="primary-button small-button" id="addTaskButton">＋ 새 미션</button></div>
+          <article class="week-card glass-card"><div class="week-head"><div><p class="eyebrow mint">ORBITAL CHRONO</p><h2>9월 9일 (수)</h2></div><span class="pill pill-green">D-18</span></div><div class="week-strip" id="weekStrip"></div></article>
+          <article class="planner-progress glass-card"><div class="progress-row"><span>오늘의 미션 달성도</span><strong id="plannerPercent">67%</strong></div><div class="progress-track"><span id="plannerProgressBar" style="width:67%"></span></div><div class="progress-meta"><span id="plannerProgressCopy">4개 중 4개 완료</span><span>남은 시간 1시간 10분</span></div></article>
+          <div class="filter-row" id="filterRow"><button class="filter-chip active" data-filter="all">전체 <span>6</span></button><button class="filter-chip" data-filter="math">수학 ∑</button><button class="filter-chip" data-filter="science">과학 ⚗</button><button class="filter-chip" data-filter="english">영어 A</button><button class="filter-chip" data-filter="korean">국어 ᄀ</button></div>
+          <div class="task-list" id="taskList"></div>
+          <article class="ai-note glass-card"><span class="note-icon">✦</span><div><strong>용자 AI의 배정 기준</strong><p>중요도, 현재 수준, 문제당 평균 시간을 함께 반영했어요.</p></div><button class="icon-button" data-nav="ai" aria-label="AI 배정 기준 보기">→</button></article>
+        </section>
+
+        <section class="screen" data-screen="ai" aria-labelledby="aiTitle">
+          <div class="ai-hero glass-card"><div class="ai-orb"><span>✦</span><i></i></div><div><div class="ai-name-row"><h1 id="aiTitle">Gemini AI 튜터</h1><span class="live-dot">무료 연결 준비</span></div><p class="muted">문제집과 현재 진도를 바탕으로 설명해요.</p></div><button class="icon-button" id="clearChat" aria-label="대화 초기화">↻</button></div>
+          <div class="ai-chips"><button class="suggestion-chip">오늘 계획 왜 이렇게 짰어?</button><button class="suggestion-chip">미적분 적분 힌트</button><button class="suggestion-chip">시험 전 복습 순서</button></div>
+          <div class="chat-window" id="chatWindow">
+            <div class="chat-time">오늘 오후 8:42</div>
+            <div class="bubble user">이번 주에 수학이랑 과학을 같이 챙기려면 어떻게 공부해야 해?</div>
+            <div class="bubble ai"><div class="bubble-label"><span class="ai-mini">✦</span> 용자 AI</div><p>수학은 시험까지 남은 범위가 많고 중요도가 높아서 먼저 배정했어요. 오늘은 적분 응용 20제를 끝낸 뒤, 과학 뉴턴 역학을 30분 복습하면 흐름이 좋아요.</p><div class="ai-tip">💡 기초가 약한 단원은 문제 수를 줄이고 풀이 후 5분 회고를 남겨주세요.</div><button class="outline-button">핵심 카드 저장</button></div>
+          </div>
+          <div class="context-card glass-card"><div class="context-head"><span>현재 학습 맥락</span><button class="text-button" id="editContext">수정</button></div><div class="context-tags"><span>고등학교 2학년</span><span id="levelTag">학습 수준 · 보완</span><span>수학 · 미적분</span><span>개념원리</span><span>중간고사 D-18</span></div></div>
+          <form class="chat-composer glass-card" id="chatForm"><button type="button" class="icon-button" aria-label="문제 사진 첨부">▧</button><input id="chatInput" placeholder="궁금한 개념이나 수행 내신 기출을 물어보세요" autocomplete="off" /><button class="send-button" aria-label="질문 보내기">➤</button></form>
+          <p class="disclaimer">Gemini 무료 버전 연결 시, Google 계정으로 로그인한 뒤 질문을 보낼 수 있어요.</p>
+        </section>
+
+        <section class="screen" data-screen="theme" aria-labelledby="themeTitle">
+          <div class="screen-title-row"><div><p class="eyebrow">ATMOSPHERIC STUDIO</p><h1 id="themeTitle">테마 스튜디오</h1><p class="muted">몰입을 돕는 나만의 학습 환경을 골라보세요.</p></div><span class="pill pill-purple">실시간 프리뷰</span></div>
+          <article class="theme-preview glass-card"><div class="preview-status"><span class="mint">● 현재 적용 중인 테마</span><span class="pill">Deep Cosmic</span></div><div class="preview-stage" id="previewStage"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><span class="preview-spark">✦</span><div class="preview-copy"><span class="pill pill-purple">딥 코스믹 스페이스</span><strong>45:00</strong><small>수학 · 집중 궤도 활성</small></div><div class="preview-dock">◷　▤　✦</div></div><div class="preview-caption"><div><strong id="selectedThemeName">딥 코스믹 스페이스</strong><span>네온 바이올렛 · 오로라 인디고</span></div><button class="outline-button" id="tuneTheme">세부 조정</button></div></article>
+          <div class="section-heading compact"><div><p class="eyebrow">THEME PACKS</p><h2>학문별 테마 팩</h2></div><span class="muted small">4개 세트</span></div>
+          <div class="theme-grid" id="themeGrid"><button class="theme-tile active" data-theme="cosmic"><span>✦</span><strong>우주 탐구</strong><small>오로라 성운 · 네온 인디고</small></button><button class="theme-tile indigo" data-theme="math"><span>△</span><strong>기하 & 수학</strong><small>청량한 인디고 · 정밀한 선</small></button><button class="theme-tile mint-theme" data-theme="science"><span>⚗</span><strong>분자 과학</strong><small>에메랄드 · 실험실 글로우</small></button><button class="theme-tile gold" data-theme="humanities"><span>▤</span><strong>인문 & 문학</strong><small>골드 앰버 · 조용한 서재</small></button></div>
+          <article class="controls-card glass-card"><div class="control-row"><label for="blurRange">배경 블러 <output id="blurValue">30%</output></label><input id="blurRange" type="range" min="0" max="100" value="30" /></div><div class="control-row"><label for="darkRange">어둡기 오버레이 <output id="darkValue">60%</output></label><input id="darkRange" type="range" min="0" max="100" value="60" /></div><div class="control-row"><label for="glowRange">네온 글로우 <output id="glowValue">75%</output></label><input id="glowRange" type="range" min="0" max="100" value="75" /></div></article>
+          <button class="primary-button wide" id="applyTheme">✦ 모든 화면에 테마 적용</button>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="주요 메뉴"><button class="nav-item active" data-nav="home"><span>◷</span><small>홈 & 타이머</small></button><button class="nav-item" data-nav="planner"><span>▤</span><small>과목 플래너</small></button><button class="nav-item" data-nav="ai"><span>✦</span><small>AI 튜터</small></button><button class="nav-item" data-nav="theme"><span>◌</span><small>테마 스튜디오</small></button></nav>
+    </div>
+
+    <div class="modal-backdrop" id="taskModal" aria-hidden="true"><div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle"><div class="modal-head"><div><p class="eyebrow">NEW MISSION</p><h2 id="taskModalTitle">새 미션 추가</h2></div><button class="icon-button" data-close="taskModal" aria-label="닫기">×</button></div><form id="taskForm"><label>과목<select id="taskSubject"><option value="math">수학 ∑</option><option value="science">과학 ⚗</option><option value="english">영어 A</option><option value="korean">국어 ᄀ</option></select></label><label>공부할 내용<input id="taskTitle" required placeholder="예: 문제집 41~52번" /></label><label>교재·범위<input id="taskRange" placeholder="예: 개념원리 미적분 · p.148–156" /></label><label>예상 시간 (분)<input id="taskMinutes" type="number" min="5" max="300" value="30" required /></label><button class="primary-button wide" type="submit">미션 저장</button></form></div></div>
+
+    <div class="modal-backdrop" id="profileModal" aria-hidden="true"><div class="modal-card profile-modal" role="dialog" aria-modal="true" aria-labelledby="profileTitle"><div class="modal-head"><div><p class="eyebrow">MY ACCOUNT</p><h2 id="profileTitle">내 용자 프로필</h2></div><button class="icon-button" data-close="profileModal" aria-label="닫기">×</button></div><div class="profile-summary"><div class="profile-avatar">민</div><div><strong id="profileName">민서</strong><p id="profileEmail" class="muted">아직 Google 계정이 연결되지 않았어요.</p></div></div><button class="google-button" id="googleLogin"><span class="google-g">G</span><span id="googleButtonLabel">Google 계정으로 계속하기</span></button><div class="level-section"><div class="level-heading"><span>나의 학습 수준</span><small>성적 대신 현재 느낌으로 선택해요</small></div><div class="level-grid" id="levelGrid"><button class="level-option" data-level="기초"><span>🌱</span><strong>기초</strong><small>개념부터 차근차근</small></button><button class="level-option active" data-level="보완"><span>🧩</span><strong>보완</strong><small>약한 단원 채우기</small></button><button class="level-option" data-level="중간"><span>🚀</span><strong>중간</strong><small>균형 있게 진행</small></button><button class="level-option" data-level="심화"><span>⚡</span><strong>심화</strong><small>어려운 문제까지</small></button></div></div><div class="account-note"><span>✦</span><p>로그인하면 나만의 학습 기록과 Gemini AI 튜터 설정을 안전하게 이어갈 수 있어요.</p></div><button class="outline-button wide" data-close="profileModal">닫기</button></div></div>
+
+    <div class="modal-backdrop" id="timerModal" aria-hidden="true"><div class="timer-modal" role="dialog" aria-modal="true" aria-labelledby="timerTitle"><button class="icon-button close-timer" data-close="timerModal" aria-label="닫기">×</button><p class="eyebrow mint">FOCUS ORBIT</p><h2 id="timerTitle">미적분 적분 응용 문제 20제</h2><div class="timer-ring"><svg viewBox="0 0 240 240" aria-hidden="true"><circle class="timer-track" cx="120" cy="120" r="102"></circle><circle class="timer-progress" id="timerProgress" cx="120" cy="120" r="102"></circle></svg><div><strong id="timerDisplay">25:00</strong><span>집중 궤도 활성</span></div></div><p class="muted center">개념원리 미적분 · p.148–156</p><div class="timer-actions"><button class="icon-button" id="resetTimer">↺</button><button class="primary-button timer-toggle" id="timerToggle">▶ 시작</button><button class="icon-button" data-close="timerModal">×</button></div></div></div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
