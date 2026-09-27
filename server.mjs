@@ -69,7 +69,7 @@ async function verifyGoogleToken(token) {
     if (!response.ok) return null;
     const payload = await response.json();
     const issuerIsValid = payload.iss === "accounts.google.com" || payload.iss === "https://accounts.google.com";
-    if (!issuerIsValid || payload.aud !== googleClientId || !payload.email || Number(payload.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
+    if (!issuerIsValid || payload.aud !== googleClientId || !payload.sub || Number(payload.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
     return null;
@@ -127,7 +127,7 @@ async function handleGemini(request, response) {
     sendJson(response, 502, { error: "Gemini가 비어 있는 답변을 보냈어요." }, headers);
     return;
   }
-  sendJson(response, 200, { text, model: geminiModel, user: { name: user.name, email: user.email } }, headers);
+  sendJson(response, 200, { text, model: geminiModel }, headers);
 }
 
 async function serveStatic(request, response, pathname) {

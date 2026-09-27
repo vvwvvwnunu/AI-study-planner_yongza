@@ -31,7 +31,7 @@ sessionStorage.removeItem("yongjaGoogle");
 
 const state = {
   tasks: JSON.parse(localStorage.getItem("yongjaTasks") || "null") || seedTasks,
-  googleUser: null,
+  googleConnected: false,
   googleCredential: null,
   chatHistory: [],
   aiBusy: false,
@@ -54,7 +54,9 @@ const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 
 function persist() {
-  localStorage.setItem("yongjaTasks", JSON.stringify(state.tasks));
+  const safeTasks = state.tasks.map((task) => ({ ...task, title: redactPotentialPersonalData(task.title), range: redactPotentialPersonalData(task.range) }));
+  state.tasks = safeTasks;
+  localStorage.setItem("yongjaTasks", JSON.stringify(safeTasks));
   localStorage.setItem("yongjaTheme", state.theme);
   localStorage.setItem("yongjaLevel", state.level);
 }
@@ -142,11 +144,10 @@ function renderTasks() {
 }
 
 function renderAccount() {
-  const user = state.googleUser;
-  const signedIn = Boolean(user && state.googleCredential);
+  const signedIn = Boolean(state.googleConnected && state.googleCredential);
   const openedFromFile = window.location.protocol === "file:";
-  $("#profileName").textContent = user?.name || "용자";
-  $("#profileEmail").textContent = signedIn ? `${user.email} · Google 연결됨` : "아직 Google 계정이 연결되지 않았어요.";
+  $("#profileName").textContent = "용자";
+  $("#profileEmail").textContent = signedIn ? "Google 로그인 확인됨 · 이름·이메일·사진은 저장하지 않아요." : "Google 계정 정보는 받지 않고 로그인 상태만 확인해요.";
   $("#googleButtonLabel").textContent = signedIn ? "Google 계정 다시 인증하기" : "Google 계정으로 계속하기";
   $("#googleLogin").style.opacity = signedIn ? ".72" : "1";
   // 설정이 없더라도 버튼은 눌리게 두고, 필요한 조치를 안내합니다.
@@ -159,10 +160,9 @@ function renderAccount() {
   const aiStatus = signedIn ? "Gemini 연결됨" : hasGoogleClientId ? "Google 로그인 필요" : "서버 설정 필요";
   if ($("#homeGeminiStatus")) $("#homeGeminiStatus").textContent = aiStatus;
   if ($("#aiConnectionStatus")) $("#aiConnectionStatus").textContent = aiStatus;
-  const profileAvatar = $("#profileAvatar");
-  profileAvatar.innerHTML = user?.picture ? `<img src="${escapeHtml(user.picture)}" alt="" />` : escapeHtml(user?.name?.slice(0, 1) || "용");
-  $("#avatarLetter").textContent = user?.name?.slice(0, 1) || "용";
-  $("#homeGreeting").textContent = signedIn ? `${user.name}님에게 맞춰 오늘의 타임테이블을 준비했어요.` : "오늘의 타임테이블을 준비했어요.";
+  $("#profileAvatar").textContent = "용";
+  $("#avatarLetter").textContent = "용";
+  $("#homeGreeting").textContent = "오늘의 타임테이블을 준비했어요.";
   $$(".level-option").forEach((option) => option.classList.toggle("active", option.dataset.level === state.level));
   $("#levelTag").textContent = `학습 수준 · ${state.level}`;
 }
@@ -237,27 +237,16 @@ function openTimer(task) {
   renderTimer();
 }
 
-function decodeGoogleCredential(token) {
-  try {
-    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, "=");
-    return JSON.parse(decodeURIComponent(atob(padded).split("").map((character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`).join("")));
-  } catch {
-    return null;
-  }
-}
-
 function handleGoogleCredential(response) {
-  const user = decodeGoogleCredential(response?.credential || "");
-  if (!user?.email) {
+  if (!response?.credential) {
     showToast("Google 로그인 응답을 확인하지 못했어요.");
     return;
   }
   state.googleCredential = response.credential;
-  state.googleUser = { name: user.name || user.email.split("@")[0], email: user.email, picture: user.picture || "" };
+  state.googleConnected = true;
   renderAccount();
   closeModal("profileModal");
-  showToast(`${state.googleUser.name}님, Google 계정이 연결됐어요.`);
+  showToast("Google 로그인 확인됨. 개인정보는 저장하지 않아요.");
 }
 
 function initGoogleAuth() {
@@ -300,10 +289,34 @@ function openGoogleLogin() {
 function buildStudyContext() {
   return {
     level: state.level,
-    tasks: state.tasks.map(({ subject, title, range, minutes, status }) => ({ subject, title, range, minutes, status })),
+    tasks: state.tasks.map(({ subject, title, range, minutes, status }) => ({ subject, title: redactPotentialPersonalData(title), range: redactPotentialPersonalData(range), minutes, status })),
     instructions: "고등학생에게 친절하고 짧은 한국어로 답하고, 등록된 타임테이블과 문제집 범위를 우선 반영하세요.",
   };
 }
+
+const personalDataPatterns = [
+  /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/gi,
+  /\b01[016789][ -]?\d{3,4}[ -]?\d{4}\b/g,
+  /\b\d{6}[ -]?[1-4]\d{6}\b/g,
+];
+
+function redactPotentialPersonalData(value) {
+  return personalDataPatterns.reduce((result, pattern) => result.replace(pattern, "[개인정보 삭제됨]"), String(value ?? ""));
+}
+
+function containsPotentialPersonalData(value) {
+  const text = String(value ?? "");
+  return personalDataPatterns.some((pattern) => {
+    pattern.lastIndex = 0;
+    const matched = pattern.test(text);
+    pattern.lastIndex = 0;
+    return matched;
+  });
+}
+
+// 예전에 저장된 미션에도 이메일·전화번호 형식이 있으면 브라우저 저장값에서 제거합니다.
+state.tasks = state.tasks.map((task) => ({ ...task, title: redactPotentialPersonalData(task.title), range: redactPotentialPersonalData(task.range) }));
+localStorage.setItem("yongjaTasks", JSON.stringify(state.tasks));
 
 async function requestGemini(message) {
   if (!state.googleCredential) throw new Error("Google 로그인 후 Gemini를 사용할 수 있어요.");
@@ -327,6 +340,10 @@ function appendChatBubble(message, type) {
 async function sendChat(message) {
   const clean = message.trim();
   if (!clean || state.aiBusy) return;
+  if (containsPotentialPersonalData(clean)) {
+    showToast("이름·연락처·이메일 같은 개인정보는 입력하지 말아 주세요.");
+    return;
+  }
   const windowEl = $("#chatWindow");
   appendChatBubble(clean, "user");
   $("#chatInput").value = "";
@@ -353,6 +370,10 @@ async function sendChat(message) {
 async function sendHomeChat(message) {
   const clean = message.trim();
   if (!clean || state.aiBusy) return;
+  if (containsPotentialPersonalData(clean)) {
+    showToast("이름·연락처·이메일 같은 개인정보는 입력하지 말아 주세요.");
+    return;
+  }
   const reply = $("#homeAiReply");
   $("#homeChatInput").value = "";
   reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> <span class="ai-loading">타임테이블을 확인하고 있어요</span>`;
@@ -417,9 +438,14 @@ document.addEventListener("click", (event) => {
 $("#taskForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const title = $("#taskTitle").value.trim();
+  const range = $("#taskRange").value.trim();
   const minutes = Number($("#taskMinutes").value);
   if (!title || !minutes || minutes < 5) return;
-  state.tasks.push({ id: `t${Date.now()}`, subject: $("#taskSubject").value, title, range: $("#taskRange").value.trim() || "범위 직접 입력", minutes, status: "pending", current: false });
+  if (containsPotentialPersonalData(title) || containsPotentialPersonalData(range)) {
+    showToast("미션에는 이름·연락처·이메일 같은 개인정보를 입력하지 말아 주세요.");
+    return;
+  }
+  state.tasks.push({ id: `t${Date.now()}`, subject: $("#taskSubject").value, title, range: range || "범위 직접 입력", minutes, status: "pending", current: false });
   persist(); renderAll(); closeModal("taskModal"); event.target.reset(); showToast("새 미션을 오늘 계획에 추가했어요.");
 });
 
