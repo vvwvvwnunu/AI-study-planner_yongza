@@ -51,20 +51,21 @@ function normalizeHistory(history) {
   })).filter((item) => item.parts[0].text);
 }
 
-export default async function handler(request) {
+export function OPTIONS(request) {
   const headers = corsHeaders(request);
-  if (request.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        ...headers,
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Max-Age": "86400",
-      },
-    });
-  }
-  if (request.method !== "POST") return json({ error: "POST 요청만 지원해요." }, 405, headers);
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...headers,
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Max-Age": "86400",
+    },
+  });
+}
+
+export async function POST(request) {
+  const headers = corsHeaders(request);
 
   if (!configured(geminiApiKey) || !configured(googleClientId)) {
     return json({ error: "Vercel 환경 변수에 Google Client ID와 Gemini API 키를 설정해 주세요." }, 503, headers);

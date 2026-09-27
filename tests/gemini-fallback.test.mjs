@@ -67,3 +67,26 @@ test("moves to the next model if the upstream connection fails", async () => {
   assert.equal(result.model, "gemini-3.7-flash");
   assert.equal(result.fallbackUsed, true);
 });
+
+test("Vercel routes export HTTP method handlers that return responses", async () => {
+  process.env.GEMINI_API_KEY = "test-key";
+  process.env.GOOGLE_CLIENT_ID = "test-client.apps.googleusercontent.com";
+  const health = await import("../api/health.mjs");
+  const gemini = await import("../api/gemini.mjs");
+
+  assert.equal(typeof health.GET, "function");
+  assert.equal("default" in health, false);
+  const healthResponse = await health.GET(new Request("https://example.test/api/health"));
+  const healthBody = await healthResponse.json();
+  assert.equal(healthResponse.status, 200);
+  assert.equal(healthBody.model, "gemini-3.8-flash");
+  assert.deepEqual(healthBody.fallbackModels, ["gemini-3.7-flash", "gemini-3.5-flash"]);
+
+  assert.equal(typeof gemini.POST, "function");
+  assert.equal(typeof gemini.OPTIONS, "function");
+  assert.equal("default" in gemini, false);
+  const optionsResponse = await gemini.OPTIONS(new Request("https://example.test/api/gemini", { method: "OPTIONS" }));
+  assert.equal(optionsResponse.status, 204);
+  const postResponse = await gemini.POST(new Request("https://example.test/api/gemini", { method: "POST", body: JSON.stringify({ prompt: "hi" }) }));
+  assert.equal(postResponse.status, 401);
+});

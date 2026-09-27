@@ -6,8 +6,7 @@ function configured(value) {
   return Boolean(value && !/^YOUR_|^your_/i.test(value));
 }
 
-export default function handler(request) {
-  if (request.method !== "GET") return Response.json({ error: "GET 요청만 지원해요." }, { status: 405 });
+export function GET() {
   return Response.json({
     ok: true,
     geminiConfigured: configured(geminiApiKey),
