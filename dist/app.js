@@ -24,9 +24,17 @@ const seedTasks = [
   { id: "t6", subject: "math", title: "오답 노트: 치환적분 8문제", range: "개념원리 미적분 · 오답 복습", minutes: 22, status: "pending", current: false },
 ];
 
+// 이전 프로토타입이 저장했던 가짜 Google 계정 상태를 한 번만 정리합니다.
+// 실제 로그인 정보는 현재 세션의 Google Identity Services 응답으로만 채웁니다.
+localStorage.removeItem("yongjaGoogle");
+sessionStorage.removeItem("yongjaGoogle");
+
 const state = {
   tasks: JSON.parse(localStorage.getItem("yongjaTasks") || "null") || seedTasks,
-  signedIn: localStorage.getItem("yongjaGoogle") === "true",
+  googleUser: null,
+  googleCredential: null,
+  chatHistory: [],
+  aiBusy: false,
   screen: "home",
   filter: "all",
   timerSeconds: 25 * 60,
@@ -37,12 +45,16 @@ const state = {
   level: localStorage.getItem("yongjaLevel") || "보완",
 };
 
+const appConfig = window.YONGJA_CONFIG || {};
+const apiBaseUrl = String(appConfig.apiBaseUrl || "").replace(/\/$/, "");
+const hasGoogleClientId = Boolean(appConfig.googleClientId && !String(appConfig.googleClientId).includes("YOUR_GOOGLE"));
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
 
 function persist() {
   localStorage.setItem("yongjaTasks", JSON.stringify(state.tasks));
-  localStorage.setItem("yongjaGoogle", String(state.signedIn));
   localStorage.setItem("yongjaTheme", state.theme);
   localStorage.setItem("yongjaLevel", state.level);
 }
@@ -130,9 +142,27 @@ function renderTasks() {
 }
 
 function renderAccount() {
-  $("#profileEmail").textContent = state.signedIn ? "minseo.yongja@gmail.com · Google 연결됨" : "아직 Google 계정이 연결되지 않았어요.";
-  $("#googleButtonLabel").textContent = state.signedIn ? "Google 계정 연결됨" : "Google 계정으로 계속하기";
-  $("#googleLogin").style.opacity = state.signedIn ? ".72" : "1";
+  const user = state.googleUser;
+  const signedIn = Boolean(user && state.googleCredential);
+  const openedFromFile = window.location.protocol === "file:";
+  $("#profileName").textContent = user?.name || "용자";
+  $("#profileEmail").textContent = signedIn ? `${user.email} · Google 연결됨` : "아직 Google 계정이 연결되지 않았어요.";
+  $("#googleButtonLabel").textContent = signedIn ? "Google 계정 다시 인증하기" : "Google 계정으로 계속하기";
+  $("#googleLogin").style.opacity = signedIn ? ".72" : "1";
+  // 설정이 없더라도 버튼은 눌리게 두고, 필요한 조치를 안내합니다.
+  $("#googleLogin").disabled = false;
+  $("#googleHelper").textContent = openedFromFile
+    ? "index.html을 직접 열지 말고 http://127.0.0.1:4173에서 실행해 주세요."
+    : hasGoogleClientId
+      ? (signedIn ? "이 계정의 Gemini 세션이 연결되어 있어요." : "Google 로그인 후 Gemini AI 튜터를 사용할 수 있어요.")
+      : "config.js에 Google Web Client ID를 설정하면 로그인이 활성화돼요.";
+  const aiStatus = signedIn ? "Gemini 연결됨" : hasGoogleClientId ? "Google 로그인 필요" : "서버 설정 필요";
+  if ($("#homeGeminiStatus")) $("#homeGeminiStatus").textContent = aiStatus;
+  if ($("#aiConnectionStatus")) $("#aiConnectionStatus").textContent = aiStatus;
+  const profileAvatar = $("#profileAvatar");
+  profileAvatar.innerHTML = user?.picture ? `<img src="${escapeHtml(user.picture)}" alt="" />` : escapeHtml(user?.name?.slice(0, 1) || "용");
+  $("#avatarLetter").textContent = user?.name?.slice(0, 1) || "용";
+  $("#homeGreeting").textContent = signedIn ? `${user.name}님에게 맞춰 오늘의 타임테이블을 준비했어요.` : "오늘의 타임테이블을 준비했어요.";
   $$(".level-option").forEach((option) => option.classList.toggle("active", option.dataset.level === state.level));
   $("#levelTag").textContent = `학습 수준 · ${state.level}`;
 }
@@ -207,29 +237,136 @@ function openTimer(task) {
   renderTimer();
 }
 
-function sendChat(message) {
-  const clean = message.trim();
-  if (!clean) return;
+function decodeGoogleCredential(token) {
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload.padEnd(Math.ceil(payload.length / 4) * 4, "=");
+    return JSON.parse(decodeURIComponent(atob(padded).split("").map((character) => `%${character.charCodeAt(0).toString(16).padStart(2, "0")}`).join("")));
+  } catch {
+    return null;
+  }
+}
+
+function handleGoogleCredential(response) {
+  const user = decodeGoogleCredential(response?.credential || "");
+  if (!user?.email) {
+    showToast("Google 로그인 응답을 확인하지 못했어요.");
+    return;
+  }
+  state.googleCredential = response.credential;
+  state.googleUser = { name: user.name || user.email.split("@")[0], email: user.email, picture: user.picture || "" };
+  renderAccount();
+  closeModal("profileModal");
+  showToast(`${state.googleUser.name}님, Google 계정이 연결됐어요.`);
+}
+
+function initGoogleAuth() {
+  if (!hasGoogleClientId) {
+    renderAccount();
+    return;
+  }
+  if (!window.google?.accounts?.id) {
+    window.setTimeout(initGoogleAuth, 250);
+    return;
+  }
+  window.google.accounts.id.initialize({
+    client_id: appConfig.googleClientId,
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: true,
+  });
+}
+
+function openGoogleLogin() {
+  if (window.location.protocol === "file:") {
+    showToast("index.html을 직접 열 수 없어요. 로컬 서버 주소로 접속해 주세요.");
+    return;
+  }
+  if (!hasGoogleClientId) {
+    showToast("config.js에 Google Web Client ID를 먼저 설정해 주세요.");
+    return;
+  }
+  if (!window.google?.accounts?.id) {
+    showToast("Google 로그인 모듈을 불러오는 중이에요. 잠시 후 다시 눌러주세요.");
+    return;
+  }
+  window.google.accounts.id.prompt((notification) => {
+    if (notification.isNotDisplayed?.() || notification.isSkippedMoment?.()) {
+      showToast("Google 로그인 창이 표시되지 않았어요. 브라우저 팝업 차단을 확인해 주세요.");
+    }
+  });
+}
+
+function buildStudyContext() {
+  return {
+    level: state.level,
+    tasks: state.tasks.map(({ subject, title, range, minutes, status }) => ({ subject, title, range, minutes, status })),
+    instructions: "고등학생에게 친절하고 짧은 한국어로 답하고, 등록된 타임테이블과 문제집 범위를 우선 반영하세요.",
+  };
+}
+
+async function requestGemini(message) {
+  if (!state.googleCredential) throw new Error("Google 로그인 후 Gemini를 사용할 수 있어요.");
+  const response = await fetch(`${apiBaseUrl}/api/gemini`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${state.googleCredential}` },
+    body: JSON.stringify({ prompt: message, context: buildStudyContext(), history: state.chatHistory.slice(-8) }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Gemini 응답을 받지 못했어요.");
+  return payload.text || "Gemini가 답변을 만들지 못했어요.";
+}
+
+function appendChatBubble(message, type) {
   const windowEl = $("#chatWindow");
-  windowEl.insertAdjacentHTML("beforeend", `<div class="bubble user">${clean.replace(/[<>]/g, "")}</div>`);
-  const answer = clean.includes("계획") ? "현재 계획은 수학의 중요도와 시험까지 남은 기간을 우선 반영했어요. 오늘 수학 50분 뒤 과학 30분 복습을 하면 두 과목 모두 흐름을 놓치지 않아요." : clean.includes("적분") ? "치환할 식을 먼저 하나의 문자로 바꿔보세요. u를 정한 뒤 du가 문제 안에 있는지 확인하면 다음 단계가 보여요." : "현재 등록한 문제집과 진도를 기준으로 답할게요. 먼저 오늘 미션을 끝낸 다음, 막힌 개념을 한 문장으로 적어주세요.";
-  setTimeout(() => { windowEl.insertAdjacentHTML("beforeend", `<div class="bubble ai"><div class="bubble-label"><span class="ai-mini">✦</span> 용자 AI</div><p>${answer}</p><div class="ai-tip">💡 실제 Gemini 연결 후에는 내 문제집과 기록에 맞춰 더 구체적으로 답해요.</div></div>`); windowEl.scrollTop = windowEl.scrollHeight; }, 350);
-  $("#chatInput").value = "";
+  if (type === "user") windowEl.insertAdjacentHTML("beforeend", `<div class="bubble user">${escapeHtml(message)}</div>`);
+  else windowEl.insertAdjacentHTML("beforeend", `<div class="bubble ai"><div class="bubble-label"><span class="ai-mini">✦</span> 용자 AI</div><p>${escapeHtml(message).replace(/\n/g, "<br />")}</p></div>`);
   windowEl.scrollTop = windowEl.scrollHeight;
 }
 
-function sendHomeChat(message) {
+async function sendChat(message) {
   const clean = message.trim();
-  if (!clean) return;
+  if (!clean || state.aiBusy) return;
+  const windowEl = $("#chatWindow");
+  appendChatBubble(clean, "user");
+  $("#chatInput").value = "";
+  state.aiBusy = true;
+  const loading = document.createElement("div");
+  loading.className = "bubble ai ai-loading";
+  loading.textContent = "Gemini가 학습 맥락을 읽고 있어요";
+  windowEl.appendChild(loading);
+  windowEl.scrollTop = windowEl.scrollHeight;
+  try {
+    const answer = await requestGemini(clean);
+    loading.remove();
+    appendChatBubble(answer, "ai");
+    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: answer });
+  } catch (error) {
+    loading.remove();
+    appendChatBubble(error.message, "ai");
+    state.chatHistory.push({ role: "user", text: clean });
+  } finally {
+    state.aiBusy = false;
+  }
+}
+
+async function sendHomeChat(message) {
+  const clean = message.trim();
+  if (!clean || state.aiBusy) return;
   const reply = $("#homeAiReply");
-  const answer = clean.includes("먼저") || clean.includes("순서")
-    ? "지금은 16:00 국어 구조 분석을 먼저 시작해요. 45분 뒤 10분 쉬고, 19:30 과학 강의로 넘어가면 오늘 계획을 무리 없이 지킬 수 있어요."
-    : clean.includes("수학")
-      ? "수학은 중요도 ⭐⭐⭐⭐⭐라서 오늘 첫 집중 미션으로 잡혀 있어요. 타임테이블의 국어 다음에 20:20 오답 22분을 추가하면 좋아요."
-      : "현재 타임테이블 기준으로 다음 미션은 16:00 국어예요. 45분만 먼저 끝내고 완료 체크를 남겨주세요. 기록에 맞춰 다음 일정도 다시 조정할게요.";
-  reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${answer}`;
-  reply.classList.add("show");
   $("#homeChatInput").value = "";
+  reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> <span class="ai-loading">타임테이블을 확인하고 있어요</span>`;
+  reply.classList.add("show");
+  state.aiBusy = true;
+  try {
+    const answer = await requestGemini(clean);
+    reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${escapeHtml(answer).replace(/\n/g, "<br />")}`;
+    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: answer });
+  } catch (error) {
+    reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${escapeHtml(error.message)}`;
+  } finally {
+    state.aiBusy = false;
+  }
 }
 
 function registerWebMcp() {
@@ -260,7 +397,7 @@ document.addEventListener("click", (event) => {
   if (event.target.closest("#addTaskButton")) openModal("taskModal");
   if (event.target.closest("#startFocus")) openTimer(state.tasks.find((task) => task.current) || state.tasks[0]);
   if (event.target.closest("#refreshPlan")) { renderAll(); showToast("오늘의 계획을 다시 확인했어요."); }
-  if (event.target.closest("#googleLogin")) { state.signedIn = true; persist(); renderAccount(); showToast("Google 계정을 연결했어요."); }
+  if (event.target.closest("#googleLogin")) openGoogleLogin();
   const level = event.target.closest(".level-option");
   if (level) { state.level = level.dataset.level; persist(); renderAccount(); showToast(`학습 수준을 ${state.level}(으)로 설정했어요.`); }
   if (event.target.closest("#editContext")) { openModal("profileModal"); }
@@ -294,3 +431,4 @@ $("#homeChatForm").addEventListener("submit", (event) => { event.preventDefault(
 renderAll();
 renderTimer();
 registerWebMcp();
+initGoogleAuth();
