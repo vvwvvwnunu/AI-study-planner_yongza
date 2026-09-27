@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createReadStream, existsSync } from "node:fs";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { generateWithFallback, GEMINI_MODELS } from "./api/_generate.mjs";
 
 try {
   process.loadEnvFile?.(".env");
@@ -11,7 +12,6 @@ try {
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)));
 const port = Number(process.env.PORT || 4173);
-const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const geminiApiKey = process.env.GEMINI_API_KEY || "";
 const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
 const allowedOrigin = process.env.ALLOWED_ORIGIN || "";
@@ -102,32 +102,26 @@ async function handleGemini(request, response) {
     return;
   }
   const context = body.context && typeof body.context === "object" ? body.context : {};
-  const contextText = JSON.stringify({ level: context.level, tasks: context.tasks, instructions: context.instructions }).slice(0, 9000);
+  const contextText = JSON.stringify({ today: context.today, exam: context.exam, level: context.level, tasks: context.tasks, instructions: context.instructions }).slice(0, 9000);
   const contents = [
     ...normalizeHistory(body.history),
     { role: "user", parts: [{ text: `학습자 정보와 오늘 계획을 바탕으로 답해줘.\n학습 맥락: ${contextText}\n질문: ${prompt}` }] },
   ];
-  const upstream = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(geminiModel)}:generateContent`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": geminiApiKey },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: "너는 용자라는 고등학생 학습 플래너의 AI 튜터야. 한국어로 답하고, 등록된 문제집·진도·학습 수준을 근거로 실행 가능한 다음 행동을 짧게 제안해. 모르는 내용은 추측하지 말고 확인이 필요한 부분을 알려줘." }] },
-      contents,
-      generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
-    }),
+  const generated = await generateWithFallback({
+    apiKey: geminiApiKey,
+    systemInstruction: { parts: [{ text: "너는 용자라는 고등학생 학습 플래너의 AI 튜터야. 한국어로 답하고, 등록된 문제집·진도·학습 수준을 근거로 실행 가능한 다음 행동을 짧게 제안해. 모르는 내용은 추측하지 말고 확인이 필요한 부분을 알려줘." }] },
+    contents,
+    generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
   });
-  const result = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) {
-    const message = upstream.status === 429 ? "Gemini 무료 사용량을 잠시 초과했어요. 잠시 후 다시 시도해 주세요." : "Gemini API에서 답변을 받지 못했어요.";
-    sendJson(response, upstream.status >= 500 ? 502 : upstream.status, { error: message, detail: result?.error?.message || undefined }, headers);
+  if (!generated.ok) {
+    sendJson(response, generated.status >= 500 ? 502 : generated.status, { error: generated.error, detail: generated.detail }, headers);
     return;
   }
-  const text = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-  if (!text) {
+  if (!generated.text) {
     sendJson(response, 502, { error: "Gemini가 비어 있는 답변을 보냈어요." }, headers);
     return;
   }
-  sendJson(response, 200, { text, model: geminiModel }, headers);
+  sendJson(response, 200, { text: generated.text, model: generated.model, fallbackUsed: generated.fallbackUsed }, headers);
 }
 
 async function serveStatic(request, response, pathname) {
@@ -152,7 +146,7 @@ const server = createServer(async (request, response) => {
     }
     try {
       if (url.pathname === "/api/health" && request.method === "GET") {
-        sendJson(response, 200, { ok: true, geminiConfigured: hasConfiguredValue(geminiApiKey), googleConfigured: hasConfiguredValue(googleClientId), model: geminiModel }, corsHeaders(request));
+        sendJson(response, 200, { ok: true, geminiConfigured: hasConfiguredValue(geminiApiKey), googleConfigured: hasConfiguredValue(googleClientId), model: GEMINI_MODELS[0], fallbackModels: GEMINI_MODELS.slice(1) }, corsHeaders(request));
       } else if (url.pathname === "/api/gemini" && request.method === "POST") {
         await handleGemini(request, response);
       } else {

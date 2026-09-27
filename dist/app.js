@@ -15,14 +15,12 @@ const dailyQuotes = [
   "답은 멀리 있지 않다. 다음 문제 안에 있다.",
 ];
 
-const seedTasks = [
-  { id: "t1", subject: "math", title: "미적분 적분 응용 문제 20제", range: "개념원리 미적분 · p.148–156", minutes: 50, status: "done", current: false },
-  { id: "t2", subject: "science", title: "일반물리학 뉴턴 역학 개념 총정리", range: "완자 물리학Ⅰ · p.72–81", minutes: 50, status: "done", current: true },
-  { id: "t3", subject: "korean", title: "현대소설 구조 분석 및 독후 에세이", range: "문학 자습서 · 작품 3편", minutes: 45, status: "pending", current: false },
-  { id: "t4", subject: "english", title: "수능 영단어 150개 회독", range: "워드마스터 하이퍼 2000 · Day 18", minutes: 25, status: "done", current: false },
-  { id: "t5", subject: "science", title: "천체물리학 항성 진화 3강 수강", range: "EBS 개념완성 · 강의 3강", minutes: 38, status: "done", current: false },
-  { id: "t6", subject: "math", title: "오답 노트: 치환적분 8문제", range: "개념원리 미적분 · 오답 복습", minutes: 22, status: "pending", current: false },
-];
+const planner = window.YongjaPlanner;
+const todayKey = () => planner.dateKey(new Date());
+function readStored(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+}
+const storedExam = readStored("yongjaExam", {});
 
 // 이전 프로토타입이 저장했던 가짜 Google 계정 상태를 한 번만 정리합니다.
 // 실제 로그인 정보는 현재 세션의 Google Identity Services 응답으로만 채웁니다.
@@ -30,7 +28,10 @@ localStorage.removeItem("yongjaGoogle");
 sessionStorage.removeItem("yongjaGoogle");
 
 const state = {
-  tasks: JSON.parse(localStorage.getItem("yongjaTasks") || "null") || seedTasks,
+  tasks: planner.migrateTasks(readStored("yongjaTasks", []), todayKey()),
+  selectedDate: todayKey(),
+  lastToday: todayKey(),
+  exam: { title: typeof storedExam?.title === "string" ? storedExam.title.slice(0, 60) : "", date: planner.validDateKey(storedExam?.date) ? storedExam.date : "" },
   googleConnected: false,
   googleCredential: null,
   chatHistory: [],
@@ -42,7 +43,8 @@ const state = {
   timerRunning: false,
   timerInterval: null,
   theme: localStorage.getItem("yongjaTheme") || "cosmic",
-  level: localStorage.getItem("yongjaLevel") || "보완",
+  level: ["기초", "보완", "중간", "심화"].includes(localStorage.getItem("yongjaLevel")) ? localStorage.getItem("yongjaLevel") : "",
+  timerTaskId: null,
 };
 
 const appConfig = window.YONGJA_CONFIG || {};
@@ -59,6 +61,7 @@ function persist() {
   localStorage.setItem("yongjaTasks", JSON.stringify(safeTasks));
   localStorage.setItem("yongjaTheme", state.theme);
   localStorage.setItem("yongjaLevel", state.level);
+  localStorage.setItem("yongjaExam", JSON.stringify(state.exam));
 }
 
 function showToast(message) {
@@ -94,60 +97,100 @@ function navigate(screen) {
 
 function renderHomeTimeline() {
   const timeline = $("#homeTimeline");
-  if (!timeline) return;
-  const items = [
-    { time: "15:00", task: "일반물리학 뉴턴 역학 개념 총정리", detail: "과학 · 50분", done: true },
-    { time: "16:00", task: "현대소설 구조 분석 및 독후 에세이", detail: "국어 · 45분", done: false },
-    { time: "19:30", task: "천체물리학 항성 진화 3강 수강", detail: "과학 · 38분", done: true },
-  ];
-  timeline.innerHTML = items.map((item) => `<div class="timeline-item ${item.done ? "done" : ""}"><span class="timeline-time">${item.time}</span><span class="timeline-dot"></span><div class="timeline-content"><strong>${item.task}</strong><span>${item.detail}${item.done ? " · 완료" : " · 대기 중"}</span></div></div>`).join("");
+  const tasks = planner.tasksForDate(state.tasks, todayKey());
+  timeline.innerHTML = tasks.map((task) => {
+    const done = task.status === "done";
+    const active = task.id === state.timerTaskId && state.timerRunning;
+    const subject = subjectMeta[task.subject] || subjectMeta.math;
+    return `<div class="time-row ${done ? "done-row" : active ? "current-row" : ""}" data-task-id="${escapeHtml(task.id)}">
+      <time>${escapeHtml(task.time || "미정")}</time><span class="time-line"></span>
+      <div class="time-block ${active ? "current-block" : ""}"><span class="block-status">${done ? "완료" : active ? "집중 중" : "예정"}</span>
+        <strong>${escapeHtml(task.title)}</strong><small>${subject.label} · ${task.minutes}분${task.range ? ` · ${escapeHtml(task.range)}` : ""}</small>
+        <div class="timetable-actions"><button data-action="toggle-task">${done ? "완료 취소" : "완료"}</button>${done ? "" : '<button data-action="start-task">집중 시작</button>'}<button data-action="edit-task">수정</button></div>
+      </div></div>`;
+  }).join("") || '<div class="empty-state"><strong>오늘의 첫 계획을 만들어 보세요.</strong><p>공부할 내용과 시간을 등록하면 여기에 표시돼요.</p><button class="outline-button" data-add-task>＋ 오늘 계획 추가</button></div>';
+  $("#homeGreeting").textContent = tasks.length ? `오늘 등록한 ${tasks.length}개의 계획을 차근차근 해봐요.` : "오늘 할 공부를 등록하고 나만의 하루를 시작해요.";
+}
+
+function formatDate(key, weekday = false) {
+  return new Date(`${key}T12:00:00`).toLocaleDateString("ko-KR", { month: "long", day: "numeric", ...(weekday ? { weekday: "short" } : {}) });
+}
+
+function formatMinutes(minutes) {
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}시간${minutes % 60 ? ` ${minutes % 60}분` : ""}` : `${minutes}분`;
+}
+
+function renderDates() {
+  const today = todayKey();
+  $("#quoteDate").textContent = formatDate(today);
+  $("#timetableDate").textContent = formatDate(today, true);
+  $("#liveClock").textContent = new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  $("#plannerDate").textContent = formatDate(state.selectedDate, true);
+  $("#examName").textContent = state.exam.date ? state.exam.title || "시험" : "시험일 설정";
+  $("#examDate").textContent = state.exam.date ? formatDate(state.exam.date) : "";
+  const examLabel = planner.examLabel(state.exam.date, today);
+  $("#examCountdown").textContent = state.exam.date ? examLabel : "＋";
+  $("#plannerExamLabel").textContent = examLabel;
+  $("#examSettingsButton").setAttribute("aria-label", `${state.exam.title || "시험"} ${examLabel}, 시험일 설정`);
+}
+
+function renderContext() {
+  const tasks = planner.tasksForDate(state.tasks, todayKey());
+  const subjects = [...new Set(tasks.map((task) => subjectMeta[task.subject]?.label).filter(Boolean))];
+  const ranges = [...new Set(tasks.map((task) => task.range).filter(Boolean))];
+  const tags = [state.level ? `학습 수준 · ${state.level}` : "학습 수준 미설정", `${formatDate(todayKey())} · 계획 ${tasks.length}개`, ...subjects, ...ranges];
+  tags.push(state.exam.date ? `${state.exam.title || "시험"} · ${planner.examLabel(state.exam.date, todayKey())}` : "시험일 미설정");
+  $("#contextTags").innerHTML = tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join("");
 }
 
 function renderDailyQuote() {
   const quote = $("#dailyQuote");
   if (!quote) return;
   const today = new Date();
-  const yearStart = new Date(today.getFullYear(), 0, 0);
-  const dayOfYear = Math.floor((today - yearStart) / 86400000);
+  const dayOfYear = planner.daysUntil(todayKey(), `${today.getFullYear()}-01-01`) + 1;
   quote.textContent = dailyQuotes[dayOfYear % dailyQuotes.length];
 }
 
 function renderStats() {
-  const done = state.tasks.filter((task) => task.status === "done").length;
-  const total = state.tasks.length || 1;
-  const percent = Math.round((done / total) * 100);
-  $("#doneCount").textContent = `${done} / ${total}`;
-  $("#plannerPercent").textContent = `${percent}%`;
-  $("#plannerProgressBar").style.width = `${percent}%`;
-  $("#plannerProgressCopy").textContent = `${total}개 중 ${done}개 완료`;
-  const remaining = state.tasks.filter((task) => task.status !== "done").reduce((sum, task) => sum + Number(task.minutes || 0), 0);
-  $("#plannedMinutes").textContent = remaining > 60 ? `${Math.floor(remaining / 60)}h ${remaining % 60}m` : `${remaining}m`;
+  const home = planner.stats(state.tasks, todayKey());
+  const selected = planner.stats(state.tasks, state.selectedDate);
+  $("#doneCount").textContent = `${home.done} / ${home.total}`;
+  $("#homePercent").textContent = `${home.percent}%`;
+  $("#plannedMinutes").textContent = formatMinutes(home.remainingMinutes);
+  $("#plannerPercent").textContent = `${selected.percent}%`;
+  $("#plannerProgressBar").style.width = `${selected.percent}%`;
+  $("#plannerProgressLabel").textContent = state.selectedDate === todayKey() ? "오늘의 미션 달성도" : `${formatDate(state.selectedDate)} 달성도`;
+  $("#plannerProgressCopy").textContent = `${selected.total}개 중 ${selected.done}개 완료`;
+  $("#remainingTime").textContent = `남은 시간 ${formatMinutes(selected.remainingMinutes)}`;
+  $("#allTaskCount").textContent = selected.total;
+  const streak = planner.streak(state.tasks, todayKey());
+  $("#streakCount").textContent = streak ? `${streak}일 연속` : "오늘부터 시작";
+  $("#streakChip").setAttribute("aria-label", `실제 완료 기록 기준 연속 공부 ${streak}일`);
 }
 
 function renderWeekStrip() {
-  const days = ["월", "화", "수", "목", "금", "토", "일"];
-  const dates = [7, 8, 9, 10, 11, 12, 13];
-  $("#weekStrip").innerHTML = days.map((day, index) => `<div class="day-cell ${index === 2 ? "active" : ""}"><small>${day}</small><strong>${dates[index]}</strong><i></i></div>`).join("");
+  $("#weekStrip").innerHTML = planner.weekDates(state.selectedDate).map((date) => `<button class="day-cell ${date === state.selectedDate ? "active" : ""}" data-date="${date}" aria-pressed="${date === state.selectedDate}" aria-label="${formatDate(date, true)}${date === todayKey() ? ", 오늘" : ""}"><small>${new Date(`${date}T12:00:00`).toLocaleDateString("ko-KR", {weekday:"short"})}</small><strong>${Number(date.slice(-2))}</strong>${state.tasks.some((task) => task.date === date) ? "<i></i>" : ""}</button>`).join("");
 }
 
 function renderTasks() {
   const list = $("#taskList");
-  const visible = state.tasks.filter((task) => state.filter === "all" || task.subject === state.filter);
+  const visible = planner.tasksForDate(state.tasks, state.selectedDate).filter((task) => state.filter === "all" || task.subject === state.filter);
   list.innerHTML = visible.map((task) => {
     const subject = subjectMeta[task.subject] || subjectMeta.math;
-    const status = task.status === "done" ? "완료" : task.current ? "집중 궤도" : "대기 중";
-    return `<article class="task-card ${task.current ? "current" : ""} ${task.status === "done" ? "completed" : ""}" data-task-id="${task.id}">
-      <div class="task-head"><button class="task-check" data-action="toggle-task" aria-label="${task.title} ${task.status === "done" ? "완료 취소" : "완료 처리"}">${task.status === "done" ? "✓" : ""}</button><div class="task-main"><h3>${task.title}</h3><div class="task-meta"><span class="subject-label ${subject.badge}">${subject.label} ${subject.symbol}</span><span>${task.range || "범위 직접 입력"}</span></div></div><span class="task-status">${status}</span></div>
-      <div class="task-footer"><span>◷ 예상 ${task.minutes}분</span>${task.status === "done" ? "<strong>기록됨</strong>" : `<button class="task-start" data-action="start-task">시작하기</button>`}</div>
+    const status = task.status === "done" ? "완료" : task.id === state.timerTaskId && state.timerRunning ? "집중 중" : "예정";
+    return `<article class="task-card ${task.status === "done" ? "completed" : ""}" data-task-id="${escapeHtml(task.id)}">
+      <div class="task-head"><button class="task-check" data-action="toggle-task" aria-label="${escapeHtml(task.title)} ${task.status === "done" ? "완료 취소" : "완료 처리"}">${task.status === "done" ? "✓" : ""}</button><div class="task-main"><h3>${escapeHtml(task.title)}</h3><div class="task-meta"><span class="subject-label ${subject.badge}">${subject.label} ${subject.symbol}</span><span>${escapeHtml(task.range || "교재·범위 미입력")}</span></div></div><span class="task-status">${status}</span></div>
+      <div class="task-footer"><span>◷ ${escapeHtml(task.time || "시간 미정")} · ${task.minutes}분</span>${task.status === "done" ? "<strong>기록됨</strong>" : `<button class="task-start" data-action="start-task">시작하기</button>`}</div>
+      <div class="timetable-actions"><button data-action="edit-task">수정</button><button data-action="delete-task">삭제</button></div>
     </article>`;
-  }).join("") || `<div class="empty-state glass-card">이 과목에는 아직 미션이 없어요.</div>`;
+  }).join("") || `<div class="empty-state glass-card">선택한 날짜에 ${state.filter === "all" ? "등록한 계획이" : "이 과목 계획이"} 없어요.<br><button class="outline-button" data-add-task>＋ 계획 추가</button></div>`;
 }
 
 function renderAccount() {
   const signedIn = Boolean(state.googleConnected && state.googleCredential);
   const openedFromFile = window.location.protocol === "file:";
   $("#profileName").textContent = "용자";
-  $("#profileEmail").textContent = signedIn ? "Google 로그인 확인됨 · 이름·이메일·사진은 저장하지 않아요." : "Google 계정 정보는 받지 않고 로그인 상태만 확인해요.";
+  $("#profileEmail").textContent = signedIn ? "Google 로그인 응답을 받았어요. AI 질문 시 서버에서 인증을 확인해요." : "이름·이메일·사진은 프로필에 표시하지 않아요.";
   $("#googleButtonLabel").textContent = signedIn ? "Google 계정 다시 인증하기" : "Google 계정으로 계속하기";
   $("#googleLogin").style.opacity = signedIn ? ".72" : "1";
   // 설정이 없더라도 버튼은 눌리게 두고, 필요한 조치를 안내합니다.
@@ -155,16 +198,15 @@ function renderAccount() {
   $("#googleHelper").textContent = openedFromFile
     ? "index.html을 직접 열지 말고 http://127.0.0.1:4173에서 실행해 주세요."
     : hasGoogleClientId
-      ? (signedIn ? "이 계정의 Gemini 세션이 연결되어 있어요." : "Google 로그인 후 Gemini AI 튜터를 사용할 수 있어요.")
+      ? (signedIn ? "인증 정보는 현재 페이지에서만 유지돼요." : "Google 로그인 후 Gemini AI 튜터를 사용할 수 있어요.")
       : "config.js에 Google Web Client ID를 설정하면 로그인이 활성화돼요.";
-  const aiStatus = signedIn ? "Gemini 연결됨" : hasGoogleClientId ? "Google 로그인 필요" : "서버 설정 필요";
+  const aiStatus = signedIn ? "질문을 보내보세요" : hasGoogleClientId ? "Google 로그인 필요" : "서버 설정 필요";
   if ($("#homeGeminiStatus")) $("#homeGeminiStatus").textContent = aiStatus;
   if ($("#aiConnectionStatus")) $("#aiConnectionStatus").textContent = aiStatus;
   $("#profileAvatar").textContent = "용";
   $("#avatarLetter").textContent = "용";
-  $("#homeGreeting").textContent = "오늘의 타임테이블을 준비했어요.";
   $$(".level-option").forEach((option) => option.classList.toggle("active", option.dataset.level === state.level));
-  $("#levelTag").textContent = `학습 수준 · ${state.level}`;
+  renderContext();
 }
 
 function renderTheme() {
@@ -179,10 +221,15 @@ function renderTheme() {
   document.documentElement.style.setProperty("--secondary", theme.secondary);
   document.documentElement.style.setProperty("--mint", theme.mint);
   $("#selectedThemeName").textContent = theme.name;
+  $("#previewThemeName").textContent = theme.name;
+  $("#previewThemeBadge").textContent = theme.name;
+  const firstTodayTask = planner.tasksForDate(state.tasks, todayKey())[0];
+  $("#previewTimerValue").textContent = firstTodayTask ? formatMinutes(firstTodayTask.minutes) : "--:--";
   $$(".theme-tile").forEach((tile) => tile.classList.toggle("active", tile.dataset.theme === state.theme));
 }
 
 function renderAll() {
+  renderDates();
   renderDailyQuote();
   renderHomeTimeline();
   renderStats();
@@ -210,6 +257,8 @@ function stopTimer() {
   clearInterval(state.timerInterval);
   state.timerInterval = null;
   renderTimer();
+  renderHomeTimeline();
+  renderTasks();
 }
 
 function startTimer() {
@@ -225,13 +274,17 @@ function startTimer() {
     renderTimer();
   }, 1000);
   renderTimer();
+  renderHomeTimeline();
+  renderTasks();
 }
 
 function openTimer(task) {
-  $("#timerTitle").textContent = task?.title || "미적분 적분 응용 문제 20제";
-  $("#timerModal .muted").textContent = task?.range || "개념원리 미적분 · p.148–156";
-  state.timerSeconds = 25 * 60;
-  state.timerTotal = 25 * 60;
+  if (!task) { showToast("먼저 공부할 계획을 등록해 주세요."); return; }
+  state.timerTaskId = task.id;
+  $("#timerTitle").textContent = task.title;
+  $("#timerModal .muted").textContent = task.range || `${subjectMeta[task.subject]?.label || "학습"} · ${task.minutes}분`;
+  state.timerSeconds = task.minutes * 60;
+  state.timerTotal = task.minutes * 60;
   stopTimer();
   openModal("timerModal");
   renderTimer();
@@ -246,7 +299,7 @@ function handleGoogleCredential(response) {
   state.googleConnected = true;
   renderAccount();
   closeModal("profileModal");
-  showToast("Google 로그인 확인됨. 개인정보는 저장하지 않아요.");
+  showToast("Google 로그인 응답을 받았어요.");
 }
 
 function initGoogleAuth() {
@@ -288,9 +341,11 @@ function openGoogleLogin() {
 
 function buildStudyContext() {
   return {
-    level: state.level,
-    tasks: state.tasks.map(({ subject, title, range, minutes, status }) => ({ subject, title: redactPotentialPersonalData(title), range: redactPotentialPersonalData(range), minutes, status })),
-    instructions: "고등학생에게 친절하고 짧은 한국어로 답하고, 등록된 타임테이블과 문제집 범위를 우선 반영하세요.",
+    today: todayKey(),
+    level: state.level || "미설정",
+    exam: state.exam.date ? { title: redactPotentialPersonalData(state.exam.title), date: state.exam.date, daysLeft: planner.daysUntil(state.exam.date, todayKey()) } : null,
+    tasks: planner.tasksForDate(state.tasks, todayKey()).map(({ subject, title, range, minutes, status, date, time }) => ({ subject, title: redactPotentialPersonalData(title), range: redactPotentialPersonalData(range), minutes, status, date, time })),
+    instructions: "고등학생에게 친절하고 짧은 한국어로 답하고, 실제 등록된 오늘의 계획과 시험일, 학습 수준만 사용하세요. 비어 있는 교재·진도·수준은 추측하지 말고 물어보세요. 답변은 제안이며 저장된 시간표를 직접 변경하지는 않습니다.",
   };
 }
 
@@ -316,7 +371,8 @@ function containsPotentialPersonalData(value) {
 
 // 예전에 저장된 미션에도 이메일·전화번호 형식이 있으면 브라우저 저장값에서 제거합니다.
 state.tasks = state.tasks.map((task) => ({ ...task, title: redactPotentialPersonalData(task.title), range: redactPotentialPersonalData(task.range) }));
-localStorage.setItem("yongjaTasks", JSON.stringify(state.tasks));
+state.exam.title = redactPotentialPersonalData(state.exam.title);
+persist();
 
 async function requestGemini(message) {
   if (!state.googleCredential) throw new Error("Google 로그인 후 Gemini를 사용할 수 있어요.");
@@ -327,11 +383,16 @@ async function requestGemini(message) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || "Gemini 응답을 받지 못했어요.");
-  return payload.text || "Gemini가 답변을 만들지 못했어요.";
+  return {
+    text: payload.text || "Gemini가 답변을 만들지 못했어요.",
+    model: payload.model,
+    fallbackUsed: payload.fallbackUsed === true,
+  };
 }
 
 function appendChatBubble(message, type) {
   const windowEl = $("#chatWindow");
+  $("#chatEmptyState")?.remove();
   if (type === "user") windowEl.insertAdjacentHTML("beforeend", `<div class="bubble user">${escapeHtml(message)}</div>`);
   else windowEl.insertAdjacentHTML("beforeend", `<div class="bubble ai"><div class="bubble-label"><span class="ai-mini">✦</span> 용자 AI</div><p>${escapeHtml(message).replace(/\n/g, "<br />")}</p></div>`);
   windowEl.scrollTop = windowEl.scrollHeight;
@@ -354,14 +415,14 @@ async function sendChat(message) {
   windowEl.appendChild(loading);
   windowEl.scrollTop = windowEl.scrollHeight;
   try {
-    const answer = await requestGemini(clean);
+    const result = await requestGemini(clean);
+    if (result.fallbackUsed) showToast(`기본 Gemini 모델에 일시적인 문제가 있어 ${result.model}로 답변했어요.`);
     loading.remove();
-    appendChatBubble(answer, "ai");
-    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: answer });
+    appendChatBubble(result.text, "ai");
+    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: result.text });
   } catch (error) {
     loading.remove();
     appendChatBubble(error.message, "ai");
-    state.chatHistory.push({ role: "user", text: clean });
   } finally {
     state.aiBusy = false;
   }
@@ -380,9 +441,10 @@ async function sendHomeChat(message) {
   reply.classList.add("show");
   state.aiBusy = true;
   try {
-    const answer = await requestGemini(clean);
-    reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${escapeHtml(answer).replace(/\n/g, "<br />")}`;
-    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: answer });
+    const result = await requestGemini(clean);
+    if (result.fallbackUsed) showToast(`기본 Gemini 모델에 일시적인 문제가 있어 ${result.model}로 답변했어요.`);
+    reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${escapeHtml(result.text).replace(/\n/g, "<br />")}`;
+    state.chatHistory.push({ role: "user", text: clean }, { role: "assistant", text: result.text });
   } catch (error) {
     reply.innerHTML = `<strong><span class="ai-mini">✦</span> 용자 AI</strong> ${escapeHtml(error.message)}`;
   } finally {
@@ -395,9 +457,47 @@ function registerWebMcp() {
   if (!context?.registerTool) return;
   const lifecycle = new AbortController();
   const register = (tool) => Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {});
-  register({ name: "read_study_plan", title: "Read study plan", description: "Read the visible study tasks, completion state, and estimated minutes.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute: () => ({ tasks: state.tasks.map(({ id, subject, title, range, minutes, status }) => ({ id, subject, title, range, minutes, status })) }) });
-  register({ name: "complete_study_task", title: "Complete study task", description: "Mark one visible study task complete and update the planner.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"], additionalProperties: false }, annotations: { readOnlyHint: false }, execute: ({ taskId }) => { const task = state.tasks.find((item) => item.id === taskId); if (!task) throw new Error("task not found"); task.status = "done"; persist(); renderAll(); return { id: task.id, status: task.status }; } });
+  register({ name: "read_study_plan", title: "Read study plan", description: "Read the selected date's study plan.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute: () => ({ date: state.selectedDate, tasks: planner.tasksForDate(state.tasks, state.selectedDate) }) });
+  register({ name: "complete_study_task", title: "Complete study task", description: "Mark one study task complete and update the planner.", inputSchema: { type: "object", properties: { taskId: { type: "string" } }, required: ["taskId"], additionalProperties: false }, annotations: { readOnlyHint: false }, execute: ({ taskId }) => { const task = state.tasks.find((item) => item.id === taskId); if (!task) throw new Error("task not found"); if (task.status !== "done") toggleTask(task); return { id: task.id, status: task.status }; } });
   window.addEventListener("beforeunload", () => lifecycle.abort(), { once: true });
+}
+
+function toggleTask(task) {
+  task.status = task.status === "done" ? "pending" : "done";
+  task.completedDate = task.status === "done" ? todayKey() : "";
+  if (task.id === state.timerTaskId && task.status === "done") stopTimer();
+  persist(); renderAll();
+}
+
+function openTaskEditor(task) {
+  $("#taskForm").reset();
+  $("#taskId").value = task?.id || "";
+  $("#taskModalTitle").textContent = task ? "계획 수정" : "새 미션 추가";
+  $("#taskDate").value = task?.date || (state.screen === "planner" ? state.selectedDate : todayKey());
+  $("#taskTime").value = task?.time || "";
+  if (task) {
+    $("#taskTitle").value = task.title;
+    $("#taskRange").value = task.range;
+    $("#taskSubject").value = task.subject;
+    $("#taskMinutes").value = task.minutes;
+  }
+  openModal("taskModal");
+}
+
+function openExamEditor() {
+  $("#examTitle").value = state.exam.title;
+  $("#examInput").value = state.exam.date;
+  closeModal("profileModal");
+  openModal("examModal");
+}
+
+function clearConversation() {
+  if (state.aiBusy) { showToast("답변이 끝난 뒤 대화를 초기화할 수 있어요."); return; }
+  state.chatHistory = [];
+  $("#chatWindow").innerHTML = '<div class="empty-state" id="chatEmptyState">등록한 계획을 바탕으로 궁금한 점을 물어보세요.</div>';
+  $("#homeAiReply").replaceChildren();
+  $("#homeAiReply").classList.remove("show");
+  showToast("대화를 초기화했어요.");
 }
 
 document.addEventListener("click", (event) => {
@@ -411,18 +511,30 @@ document.addEventListener("click", (event) => {
   if (action) {
     const card = action.closest("[data-task-id]");
     const task = card && state.tasks.find((item) => item.id === card.dataset.taskId);
-    if (action.dataset.action === "toggle-task" && task) { task.status = task.status === "done" ? "pending" : "done"; persist(); renderAll(); showToast(task.status === "done" ? "미션을 완료했어요." : "미션을 다시 계획에 넣었어요."); }
+    if (action.dataset.action === "toggle-task" && task) { toggleTask(task); showToast(task.status === "done" ? "미션을 완료했어요." : "미션을 다시 계획에 넣었어요."); }
     if (action.dataset.action === "start-task" && task) openTimer(task);
+    if (action.dataset.action === "edit-task" && task) openTaskEditor(task);
+    if (action.dataset.action === "delete-task" && task) {
+      if (!window.confirm(`‘${task.title}’ 계획을 삭제할까요?`)) return;
+      if (state.timerTaskId === task.id) { stopTimer(); state.timerTaskId = null; }
+      state.tasks = state.tasks.filter((item) => item.id !== task.id);
+      persist(); renderAll(); showToast("계획을 삭제했어요.");
+    }
   }
   if (event.target.closest("#profileButton")) openModal("profileModal");
-  if (event.target.closest("#addTaskButton")) openModal("taskModal");
-  if (event.target.closest("#startFocus")) openTimer(state.tasks.find((task) => task.current) || state.tasks[0]);
+  if (event.target.closest("#addTaskButton, [data-add-task]")) openTaskEditor();
+  if (event.target.closest("#examSettingsButton, [data-open-study-settings]")) openExamEditor();
+  const dateButton = event.target.closest("[data-date]");
+  if (dateButton) { state.selectedDate = dateButton.dataset.date; renderAll(); }
+  if (event.target.closest("#prevWeek")) { state.selectedDate = planner.shiftDate(state.selectedDate, -7); renderAll(); }
+  if (event.target.closest("#nextWeek")) { state.selectedDate = planner.shiftDate(state.selectedDate, 7); renderAll(); }
+  if (event.target.closest("#todayPlan")) { state.selectedDate = todayKey(); renderAll(); }
   if (event.target.closest("#refreshPlan")) { renderAll(); showToast("오늘의 계획을 다시 확인했어요."); }
   if (event.target.closest("#googleLogin")) openGoogleLogin();
   const level = event.target.closest(".level-option");
   if (level) { state.level = level.dataset.level; persist(); renderAccount(); showToast(`학습 수준을 ${state.level}(으)로 설정했어요.`); }
   if (event.target.closest("#editContext")) { openModal("profileModal"); }
-  if (event.target.closest("#clearChat")) { $("#chatWindow").innerHTML = `<div class="chat-time">새 대화를 시작했어요</div>`; showToast("대화를 초기화했어요."); }
+  if (event.target.closest("#clearChat")) clearConversation();
   const suggestion = event.target.closest(".suggestion-chip");
   if (suggestion) { $("#chatInput").value = suggestion.textContent; $("#chatInput").focus(); }
   const filter = event.target.closest(".filter-chip");
@@ -440,13 +552,35 @@ $("#taskForm").addEventListener("submit", (event) => {
   const title = $("#taskTitle").value.trim();
   const range = $("#taskRange").value.trim();
   const minutes = Number($("#taskMinutes").value);
-  if (!title || !minutes || minutes < 5) return;
+  const date = $("#taskDate").value;
+  const time = $("#taskTime").value;
+  if (!title || title.length > 120 || range.length > 160 || !Number.isInteger(minutes) || minutes < 5 || minutes > 300 || !planner.validDateKey(date) || (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time))) { showToast("날짜와 예상 시간(5~300분)을 확인해 주세요."); return; }
   if (containsPotentialPersonalData(title) || containsPotentialPersonalData(range)) {
     showToast("미션에는 이름·연락처·이메일 같은 개인정보를 입력하지 말아 주세요.");
     return;
   }
-  state.tasks.push({ id: `t${Date.now()}`, subject: $("#taskSubject").value, title, range: range || "범위 직접 입력", minutes, status: "pending", current: false });
-  persist(); renderAll(); closeModal("taskModal"); event.target.reset(); showToast("새 미션을 오늘 계획에 추가했어요.");
+  const editing = state.tasks.find((task) => task.id === $("#taskId").value);
+  const values = { subject: $("#taskSubject").value, title, range, minutes, date, time };
+  if (editing) {
+    if (editing.id === state.timerTaskId) { stopTimer(); state.timerTaskId = null; }
+    Object.assign(editing, values);
+  } else state.tasks.push({ id: window.crypto.randomUUID(), ...values, status: "pending", current: false, completedDate: "" });
+  state.selectedDate = date;
+  persist(); renderAll(); closeModal("taskModal"); event.target.reset(); showToast(editing ? "계획을 수정했어요." : `${formatDate(date)} 계획에 추가했어요.`);
+});
+
+$("#examForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const title = $("#examTitle").value.trim();
+  const date = $("#examInput").value;
+  if (!planner.validDateKey(date)) { showToast("시험일을 선택해 주세요."); return; }
+  if (containsPotentialPersonalData(title)) { showToast("시험 이름에는 개인정보를 입력하지 말아 주세요."); return; }
+  state.exam = { title: title.slice(0, 60), date };
+  persist(); renderAll(); closeModal("examModal"); showToast("시험일을 저장했어요.");
+});
+$("#clearExam").addEventListener("click", () => {
+  state.exam = { title: "", date: "" };
+  persist(); renderAll(); closeModal("examModal"); showToast("시험일 설정을 지웠어요.");
 });
 
 $("#chatForm").addEventListener("submit", (event) => { event.preventDefault(); sendChat($("#chatInput").value); });
@@ -458,3 +592,14 @@ renderAll();
 renderTimer();
 registerWebMcp();
 initGoogleAuth();
+
+function refreshCalendar() {
+  const today = todayKey();
+  if (today !== state.lastToday) {
+    if (state.selectedDate === state.lastToday) state.selectedDate = today;
+    state.lastToday = today;
+    renderAll();
+  } else renderDates();
+}
+setInterval(refreshCalendar, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshCalendar(); });
